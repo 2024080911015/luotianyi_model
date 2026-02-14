@@ -16,40 +16,53 @@ class DesktopPetImage:
         self.screen_width = win32api.GetSystemMetrics(0)
         self.screen_height = win32api.GetSystemMetrics(1)
 
-        self.pet_size = 200
+        self.pet_width = 200
+        self.pet_height = 280  # 角色高度比宽度大，更符合人物比例
         self.use_animation = use_animation
 
         if use_animation:
-            self.character = AnimatedCharacter("images", self.pet_size, frame_delay=100)
+            self.character = AnimatedCharacter(
+                "images", self.pet_width, self.pet_height, frame_delay=100
+            )
         else:
-            self.character = ImageCharacter("images", self.pet_size)
+            self.character = ImageCharacter("images", self.pet_width, self.pet_height)
 
-        self.window_width = self.pet_size + 100
-        self.window_height = self.pet_size + 100
+        # 窗口大小：角色大小 + 上方留给气泡的空间
+        self.bubble_area_height = 60
+        self.window_width = self.pet_width
+        self.window_height = self.pet_height + self.bubble_area_height
 
         self.screen = pygame.display.set_mode(
             (self.window_width, self.window_height), pygame.NOFRAME | pygame.SRCALPHA
         )
-        pygame.display.set_caption("洛天依桌面助手 - 图片版")
+        pygame.display.set_caption("Luotianyi Desktop Pet")
 
-        hwnd = pygame.display.get_wm_info()["window"]
+        self.hwnd = pygame.display.get_wm_info()["window"]
+
+        # 关键修复：只设置 WS_EX_LAYERED，不设置 WS_EX_TRANSPARENT
+        # WS_EX_TRANSPARENT 会让鼠标事件穿透窗口，导致无法拖拽
         win32gui.SetWindowLong(
-            hwnd,
+            self.hwnd,
             win32con.GWL_EXSTYLE,
-            win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-            | win32con.WS_EX_LAYERED
-            | win32con.WS_EX_TRANSPARENT,
+            win32gui.GetWindowLong(self.hwnd, win32con.GWL_EXSTYLE)
+            | win32con.WS_EX_LAYERED,
         )
 
+        # 使用 colorkey 让黑色背景透明
+        self.colorkey = (1, 1, 1)  # 用近黑色作为透明色，避免角色本身的黑色被透掉
         win32gui.SetLayeredWindowAttributes(
-            hwnd, win32api.RGB(0, 0, 0), 0, win32con.LWA_COLORKEY
+            self.hwnd,
+            win32api.RGB(*self.colorkey),
+            0,
+            win32con.LWA_COLORKEY,
         )
 
-        self.x = self.screen_width - self.window_width - 50
-        self.y = self.screen_height - self.window_height - 50
+        # 初始位置：屏幕右下角
+        self.x = self.screen_width - self.window_width - 80
+        self.y = self.screen_height - self.window_height - 80
 
         win32gui.SetWindowPos(
-            hwnd,
+            self.hwnd,
             win32con.HWND_TOPMOST,
             int(self.x),
             int(self.y),
@@ -58,23 +71,29 @@ class DesktopPetImage:
             0,
         )
 
+        # 拖拽相关
         self.dragging = False
-        self.drag_offset_x = 0
-        self.drag_offset_y = 0
+        self.drag_start_x = 0
+        self.drag_start_y = 0
 
+        # 状态
         self.state = "idle"
-        self.state_timer = 0
+        self.state_timer = pygame.time.get_ticks()
         self.state_duration = random.randint(3000, 8000)
 
-        self.animation_frame = 0
+        # 动画
+        self.animation_frame = 0.0
         self.animation_speed = 0.1
 
+        # 气泡对话
         self.bubble_text = ""
         self.bubble_timer = 0
         self.bubble_duration = 3000
 
+        # 鼠标交互
         self.mouse_over = False
         self.click_timer = 0
+        self.warned_once = {}  # 防止重复打印警告
 
         self.dialogs = [
             "你好呀！我是洛天依~",
@@ -93,9 +112,8 @@ class DesktopPetImage:
         self.running = True
 
     def update_position(self):
-        hwnd = pygame.display.get_wm_info()["window"]
         win32gui.SetWindowPos(
-            hwnd,
+            self.hwnd,
             win32con.HWND_TOPMOST,
             int(self.x),
             int(self.y),
@@ -110,38 +128,42 @@ class DesktopPetImage:
                 self.running = False
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_x, mouse_y = pygame.mouse.get_pos()
+                mouse_x, mouse_y = event.pos
 
                 if event.button == 1:
-                    pet_rect = pygame.Rect(50, 50, self.pet_size, self.pet_size)
+                    # 点击区域：角色所在区域
+                    pet_rect = pygame.Rect(
+                        0, self.bubble_area_height, self.pet_width, self.pet_height
+                    )
                     if pet_rect.collidepoint(mouse_x, mouse_y):
                         self.dragging = True
-                        self.drag_offset_x = mouse_x
-                        self.drag_offset_y = mouse_y
+                        # 记录鼠标在屏幕上的绝对位置
+                        self.drag_start_x, self.drag_start_y = win32api.GetCursorPos()
                         self.state = "surprise"
-                        self.state_timer = 0
+                        self.state_timer = pygame.time.get_ticks()
                         self.show_bubble("哎呀！别抓我~")
 
                 elif event.button == 3:
                     self.show_context_menu()
 
             elif event.type == pygame.MOUSEBUTTONUP:
-                if event.button == 1:
+                if event.button == 1 and self.dragging:
                     self.dragging = False
-                    if self.state == "surprise":
-                        self.state = "happy"
-                        self.state_timer = 0
-                        self.state_duration = 2000
+                    self.state = "happy"
+                    self.state_timer = pygame.time.get_ticks()
+                    self.state_duration = 2000
 
             elif event.type == pygame.MOUSEMOTION:
                 if self.dragging:
-                    mouse_x, mouse_y = pygame.mouse.get_pos()
-                    dx = mouse_x - self.drag_offset_x
-                    dy = mouse_y - self.drag_offset_y
+                    # 用屏幕绝对坐标计算偏移，避免窗口坐标跳动
+                    cur_x, cur_y = win32api.GetCursorPos()
+                    dx = cur_x - self.drag_start_x
+                    dy = cur_y - self.drag_start_y
 
                     self.x += dx
                     self.y += dy
 
+                    # 限制在屏幕范围内
                     self.x = max(0, min(self.x, self.screen_width - self.window_width))
                     self.y = max(
                         0, min(self.y, self.screen_height - self.window_height)
@@ -149,8 +171,8 @@ class DesktopPetImage:
 
                     self.update_position()
 
-                    self.drag_offset_x = mouse_x
-                    self.drag_offset_y = mouse_y
+                    self.drag_start_x = cur_x
+                    self.drag_start_y = cur_y
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
@@ -189,34 +211,9 @@ class DesktopPetImage:
                 self.state = "idle"
                 self.state_duration = random.randint(3000, 8000)
 
+        # 气泡消失
         if self.bubble_text and current_time - self.bubble_timer > self.bubble_duration:
             self.bubble_text = ""
-
-        mouse_x, mouse_y = pygame.mouse.get_pos()
-        screen_mouse_x = self.x + mouse_x
-        screen_mouse_y = self.y + mouse_y
-
-        pet_screen_rect = pygame.Rect(
-            self.x + 50, self.y + 50, self.pet_size, self.pet_size
-        )
-
-        if pet_screen_rect.collidepoint(screen_mouse_x, screen_mouse_y):
-            if not self.mouse_over:
-                self.mouse_over = True
-                self.click_timer = current_time
-                if self.state != "surprise" and self.state != "happy":
-                    self.state = "happy"
-                    self.state_timer = current_time
-                    self.state_duration = 2000
-        else:
-            self.mouse_over = False
-
-        if self.mouse_over and current_time - self.click_timer > 5000:
-            if random.random() < 0.01:
-                self.show_bubble(
-                    random.choice(["你在看我吗？", "我可爱吗？", "想和我玩吗？"])
-                )
-                self.click_timer = current_time
 
         self.animation_frame += self.animation_speed
 
@@ -230,27 +227,33 @@ class DesktopPetImage:
 
         def exit_app():
             self.running = False
-            root.quit()
+            root.destroy()
 
         def change_size():
             size_window = tk.Toplevel(root)
-            size_window.title("调整大小")
-            size_window.geometry("200x100")
+            size_window.title("Size")
+            size_window.geometry("200x180")
 
-            tk.Label(size_window, text="选择大小:").pack(pady=10)
+            tk.Label(size_window, text="Select size:").pack(pady=10)
 
-            size_var = tk.IntVar(value=self.pet_size)
+            size_var = tk.IntVar(value=self.pet_width)
 
             def apply_size():
-                self.pet_size = size_var.get()
+                new_width = size_var.get()
+                ratio = self.pet_height / self.pet_width
+                self.pet_width = new_width
+                self.pet_height = int(new_width * ratio)
+
                 if self.use_animation:
                     self.character = AnimatedCharacter(
-                        "images", self.pet_size, frame_delay=100
+                        "images", self.pet_width, self.pet_height, frame_delay=100
                     )
                 else:
-                    self.character = ImageCharacter("images", self.pet_size)
-                self.window_width = self.pet_size + 100
-                self.window_height = self.pet_size + 100
+                    self.character = ImageCharacter(
+                        "images", self.pet_width, self.pet_height
+                    )
+                self.window_width = self.pet_width
+                self.window_height = self.pet_height + self.bubble_area_height
                 self.screen = pygame.display.set_mode(
                     (self.window_width, self.window_height),
                     pygame.NOFRAME | pygame.SRCALPHA,
@@ -258,51 +261,46 @@ class DesktopPetImage:
                 size_window.destroy()
 
             tk.Radiobutton(
-                size_window, text="小 (150)", variable=size_var, value=150
+                size_window, text="Small (120)", variable=size_var, value=120
             ).pack()
             tk.Radiobutton(
-                size_window, text="中 (200)", variable=size_var, value=200
+                size_window, text="Medium (200)", variable=size_var, value=200
             ).pack()
             tk.Radiobutton(
-                size_window, text="大 (250)", variable=size_var, value=250
+                size_window, text="Large (280)", variable=size_var, value=280
             ).pack()
-
-            tk.Button(size_window, text="应用", command=apply_size).pack(pady=10)
+            tk.Button(size_window, text="Apply", command=apply_size).pack(pady=10)
 
         def toggle_animation():
             self.use_animation = not self.use_animation
             if self.use_animation:
                 self.character = AnimatedCharacter(
-                    "images", self.pet_size, frame_delay=100
+                    "images", self.pet_width, self.pet_height, frame_delay=100
                 )
             else:
-                self.character = ImageCharacter("images", self.pet_size)
-            messagebox.showinfo(
-                "提示", f"已{'启用' if self.use_animation else '禁用'}动画模式"
-            )
+                self.character = ImageCharacter(
+                    "images", self.pet_width, self.pet_height
+                )
 
         def show_about():
-            messagebox.showinfo(
-                "关于",
-                "洛天依桌面助手 v1.0 (图片版)\n\n使用外部图片文件\n作者: 你的助手",
-            )
+            messagebox.showinfo("About", "Luotianyi Desktop Pet v1.0")
 
         root = tk.Tk()
         root.withdraw()
 
         menu = tk.Menu(root, tearoff=0)
         menu.add_command(
-            label="说话", command=lambda: self.show_bubble(random.choice(self.dialogs))
+            label="Say", command=lambda: self.show_bubble(random.choice(self.dialogs))
         )
-        menu.add_command(label="调整大小", command=change_size)
+        menu.add_command(label="Resize", command=change_size)
         menu.add_command(
-            label=f"{'禁用' if self.use_animation else '启用'}动画",
+            label=f"{'Disable' if self.use_animation else 'Enable'} Animation",
             command=toggle_animation,
         )
         menu.add_separator()
-        menu.add_command(label="关于", command=show_about)
+        menu.add_command(label="About", command=show_about)
         menu.add_separator()
-        menu.add_command(label="退出", command=exit_app)
+        menu.add_command(label="Exit", command=exit_app)
 
         try:
             x, y = win32api.GetCursorPos()
@@ -311,7 +309,8 @@ class DesktopPetImage:
             root.update()
 
     def draw(self):
-        self.screen.fill((0, 0, 0, 0))
+        # 用 colorkey 颜色填充背景（这个颜色会被透明掉）
+        self.screen.fill(self.colorkey)
 
         current_time = pygame.time.get_ticks()
 
@@ -320,11 +319,15 @@ class DesktopPetImage:
         else:
             sprite = self.character.get_sprite(self.state)
 
+        # 角色绘制在气泡区域下方
+        draw_x = 0
+        draw_y = self.bubble_area_height
+
         if self.state == "walk":
             offset = int(math.sin(self.animation_frame) * 5)
-            self.screen.blit(sprite, (50 + offset, 50))
+            self.screen.blit(sprite, (draw_x + offset, draw_y))
         else:
-            self.screen.blit(sprite, (50, 50))
+            self.screen.blit(sprite, (draw_x, draw_y))
 
         if self.bubble_text:
             self.draw_bubble(self.bubble_text)
@@ -332,48 +335,58 @@ class DesktopPetImage:
         pygame.display.flip()
 
     def draw_bubble(self, text):
-        font = pygame.font.SysFont("simhei", 16)
+        try:
+            font = pygame.font.SysFont("simhei", 14)
+        except Exception:
+            font = pygame.font.SysFont(None, 18)
 
-        words = text.split()
+        # 中文逐字换行
         lines = []
         current_line = ""
+        max_width = self.window_width - 20
 
-        for word in words:
-            test_line = current_line + word + " "
-            if font.size(test_line)[0] <= 180:
+        for char in text:
+            test_line = current_line + char
+            if font.size(test_line)[0] <= max_width:
                 current_line = test_line
             else:
                 lines.append(current_line)
-                current_line = word + " "
+                current_line = char
 
         if current_line:
             lines.append(current_line)
 
-        bubble_height = len(lines) * 25 + 20
-        bubble_width = 200
+        line_height = 20
+        bubble_height = len(lines) * line_height + 12
+        bubble_width = min(max_width + 16, self.window_width)
+        bubble_x = (self.window_width - bubble_width) // 2
+        bubble_y = max(0, self.bubble_area_height - bubble_height - 5)
 
-        bubble_x = 150 - bubble_width // 2
-        bubble_y = 20
-
+        # 气泡背景
+        bubble_surf = pygame.Surface((bubble_width, bubble_height), pygame.SRCALPHA)
         pygame.draw.rect(
-            self.screen,
-            (255, 255, 255, 230),
-            (bubble_x, bubble_y, bubble_width, bubble_height),
-            border_radius=10,
+            bubble_surf,
+            (255, 255, 255, 220),
+            (0, 0, bubble_width, bubble_height),
+            border_radius=8,
         )
-
         pygame.draw.rect(
-            self.screen,
-            (200, 200, 200, 200),
-            (bubble_x, bubble_y, bubble_width, bubble_height),
+            bubble_surf,
+            (180, 180, 180, 200),
+            (0, 0, bubble_width, bubble_height),
             2,
-            border_radius=10,
+            border_radius=8,
         )
+        self.screen.blit(bubble_surf, (bubble_x, bubble_y))
 
+        # 气泡文字
         for i, line in enumerate(lines):
-            text_surface = font.render(line.strip(), True, (0, 0, 0))
+            text_surface = font.render(line, True, (0, 0, 0))
             text_rect = text_surface.get_rect(
-                center=(bubble_x + bubble_width // 2, bubble_y + 15 + i * 25)
+                center=(
+                    self.window_width // 2,
+                    bubble_y + 8 + i * line_height + line_height // 2,
+                )
             )
             self.screen.blit(text_surface, text_rect)
 
