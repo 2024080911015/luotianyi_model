@@ -230,47 +230,53 @@ class DesktopPetImage:
             self.running = False
             root.destroy()
 
-        def change_size():
-            size_window = tk.Toplevel(root)
-            size_window.title("Size")
-            size_window.geometry("200x180")
-
-            tk.Label(size_window, text="Select size:").pack(pady=10)
-
-            size_var = tk.IntVar(value=self.pet_width)
-
-            def apply_size():
-                new_width = size_var.get()
-                ratio = self.pet_height / self.pet_width
-                self.pet_width = new_width
-                self.pet_height = int(new_width * ratio)
-
-                if self.use_animation:
-                    self.character = AnimatedCharacter(
-                        "images", self.pet_width, self.pet_height, frame_delay=100
-                    )
-                else:
-                    self.character = ImageCharacter(
-                        "images", self.pet_width, self.pet_height
-                    )
-                self.window_width = self.pet_width
-                self.window_height = self.pet_height + self.bubble_area_height
-                self.screen = pygame.display.set_mode(
-                    (self.window_width, self.window_height),
-                    pygame.NOFRAME | pygame.SRCALPHA,
+        def set_size(new_width):
+            # 固定比例 1.4 (280/200)
+            ratio = 1.4
+            self.pet_width = new_width
+            self.pet_height = int(new_width * ratio)
+            self.window_width = self.pet_width
+            self.window_height = self.pet_height + self.bubble_area_height
+            
+            # 先设置新的窗口大小
+            self.screen = pygame.display.set_mode(
+                (self.window_width, self.window_height),
+                pygame.NOFRAME | pygame.SRCALPHA,
+            )
+            
+            # 重新获取窗口句柄并设置属性
+            self.hwnd = pygame.display.get_wm_info()["window"]
+            win32gui.SetWindowLong(
+                self.hwnd,
+                win32con.GWL_EXSTYLE,
+                win32gui.GetWindowLong(self.hwnd, win32con.GWL_EXSTYLE)
+                | win32con.WS_EX_LAYERED,
+            )
+            win32gui.SetLayeredWindowAttributes(
+                self.hwnd,
+                win32api.RGB(*self.colorkey),
+                0,
+                win32con.LWA_COLORKEY,
+            )
+            win32gui.SetWindowPos(
+                self.hwnd,
+                win32con.HWND_TOPMOST,
+                int(self.x),
+                int(self.y),
+                self.window_width,
+                self.window_height,
+                0,
+            )
+            
+            # 然后重新加载角色图片（使用新尺寸）
+            if self.use_animation:
+                self.character = AnimatedCharacter(
+                    "images", self.pet_width, self.pet_height, frame_delay=100
                 )
-                size_window.destroy()
-
-            tk.Radiobutton(
-                size_window, text="Small (120)", variable=size_var, value=120
-            ).pack()
-            tk.Radiobutton(
-                size_window, text="Medium (200)", variable=size_var, value=200
-            ).pack()
-            tk.Radiobutton(
-                size_window, text="Large (280)", variable=size_var, value=280
-            ).pack()
-            tk.Button(size_window, text="Apply", command=apply_size).pack(pady=10)
+            else:
+                self.character = ImageCharacter(
+                    "images", self.pet_width, self.pet_height
+                )
 
         def toggle_animation():
             self.use_animation = not self.use_animation
@@ -293,7 +299,14 @@ class DesktopPetImage:
         menu.add_command(
             label="Say", command=lambda: self.show_bubble(random.choice(self.dialogs))
         )
-        menu.add_command(label="Resize", command=change_size)
+        
+        # 使用子菜单选择大小
+        size_menu = tk.Menu(menu, tearoff=0)
+        size_menu.add_command(label="Small (120)", command=lambda: set_size(120))
+        size_menu.add_command(label="Medium (200)", command=lambda: set_size(200))
+        size_menu.add_command(label="Large (280)", command=lambda: set_size(280))
+        menu.add_cascade(label="Resize", menu=size_menu)
+        
         menu.add_command(
             label=f"{'Disable' if self.use_animation else 'Enable'} Animation",
             command=toggle_animation,
