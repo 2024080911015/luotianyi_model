@@ -3,10 +3,12 @@ import sys
 import random
 import time
 import math
+import threading
 import win32api
 import win32con
 import win32gui
 from .character_generator import LuotianyiCharacter
+from .info_service import get_weather, get_time_info, get_greeting
 
 
 class DesktopPet:
@@ -70,6 +72,10 @@ class DesktopPet:
 
         self.mouse_over = False
         self.click_timer = 0
+
+        # 用于线程安全的气泡更新（天气查询等异步操作）
+        self._pending_bubble = None
+        self._pending_lock = threading.Lock()
 
         self.dialogs = [
             "你好呀！我是洛天依~",
@@ -154,6 +160,15 @@ class DesktopPet:
     def update_state(self):
         current_time = pygame.time.get_ticks()
 
+        # 处理异步回调的气泡更新（如天气查询结果）
+        with self._pending_lock:
+            if self._pending_bubble is not None:
+                self.show_bubble(self._pending_bubble)
+                self.state = "happy"
+                self.state_timer = current_time
+                self.state_duration = 5000
+                self._pending_bubble = None
+
         if self.dragging:
             return
 
@@ -219,6 +234,11 @@ class DesktopPet:
         self.bubble_text = text
         self.bubble_timer = pygame.time.get_ticks()
 
+    def _set_pending_bubble(self, text):
+        """线程安全地设置待显示的气泡文本（供异步回调使用）"""
+        with self._pending_lock:
+            self._pending_bubble = text
+
     def show_context_menu(self):
         import tkinter as tk
         from tkinter import messagebox
@@ -226,6 +246,27 @@ class DesktopPet:
         def exit_app():
             self.running = False
             root.quit()
+
+        def query_weather():
+            self.show_bubble("正在查询天气...")
+            self.state = "happy"
+            self.state_timer = pygame.time.get_ticks()
+            self.state_duration = 10000
+            get_weather(self._set_pending_bubble)
+
+        def query_time():
+            info = get_time_info()
+            self.show_bubble(info)
+            self.state = "happy"
+            self.state_timer = pygame.time.get_ticks()
+            self.state_duration = 5000
+
+        def query_greeting():
+            greeting = get_greeting()
+            self.show_bubble(greeting)
+            self.state = "happy"
+            self.state_timer = pygame.time.get_ticks()
+            self.state_duration = 5000
 
         def change_size():
             size_window = tk.Toplevel(root)
@@ -271,6 +312,14 @@ class DesktopPet:
         menu.add_command(
             label="说话", command=lambda: self.show_bubble(random.choice(self.dialogs))
         )
+
+        # 互动查询子菜单
+        query_menu = tk.Menu(menu, tearoff=0)
+        query_menu.add_command(label="🌤 查询天气", command=query_weather)
+        query_menu.add_command(label="🕐 查询时间", command=query_time)
+        query_menu.add_command(label="👋 今日问候", command=query_greeting)
+        menu.add_cascade(label="互动查询", menu=query_menu)
+
         menu.add_command(label="调整大小", command=change_size)
         menu.add_separator()
         menu.add_command(label="关于", command=show_about)

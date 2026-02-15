@@ -23,6 +23,7 @@ a = Analysis(
         'win32gui',
         'numpy',
         'tkinter',
+        'requests',
     ],
     hookspath=['hooks'],  # 使用自定义钩子目录
     hooksconfig={},

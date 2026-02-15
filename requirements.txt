@@ -2,3 +2,4 @@ pygame-ce
 Pillow
 pywin32
 numpy
+requests

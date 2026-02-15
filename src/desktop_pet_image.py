@@ -7,6 +7,7 @@ import win32api
 import win32con
 import win32gui
 from image_character import ImageCharacter, AnimatedCharacter
+from info_service import open_weather, get_time_info, get_greeting
 
 
 class DesktopPetImage:
@@ -94,6 +95,7 @@ class DesktopPetImage:
         # 鼠标交互
         self.mouse_over = False
         self.click_timer = 0
+
         self.warned_once = {}  # 防止重复打印警告
 
         self.dialogs = [
@@ -230,6 +232,27 @@ class DesktopPetImage:
             self.running = False
             root.destroy()
 
+        def query_weather():
+            self.show_bubble("正在打开天气预报~")
+            self.state = "happy"
+            self.state_timer = pygame.time.get_ticks()
+            self.state_duration = 3000
+            open_weather()
+
+        def query_time():
+            info = get_time_info()
+            self.show_bubble(info)
+            self.state = "happy"
+            self.state_timer = pygame.time.get_ticks()
+            self.state_duration = 5000
+
+        def query_greeting():
+            greeting = get_greeting()
+            self.show_bubble(greeting)
+            self.state = "happy"
+            self.state_timer = pygame.time.get_ticks()
+            self.state_duration = 5000
+
         def set_size(new_width):
             # 固定比例 1.4 (280/200)
             ratio = 1.4
@@ -297,24 +320,31 @@ class DesktopPetImage:
 
         menu = tk.Menu(root, tearoff=0)
         menu.add_command(
-            label="Say", command=lambda: self.show_bubble(random.choice(self.dialogs))
+            label="说话", command=lambda: self.show_bubble(random.choice(self.dialogs))
         )
+
+        # 互动查询子菜单
+        query_menu = tk.Menu(menu, tearoff=0)
+        query_menu.add_command(label="🌤 查询天气", command=query_weather)
+        query_menu.add_command(label="🕐 查询时间", command=query_time)
+        query_menu.add_command(label="👋 今日问候", command=query_greeting)
+        menu.add_cascade(label="互动查询", menu=query_menu)
         
         # 使用子菜单选择大小
         size_menu = tk.Menu(menu, tearoff=0)
-        size_menu.add_command(label="Small (120)", command=lambda: set_size(120))
-        size_menu.add_command(label="Medium (200)", command=lambda: set_size(200))
-        size_menu.add_command(label="Large (280)", command=lambda: set_size(280))
-        menu.add_cascade(label="Resize", menu=size_menu)
+        size_menu.add_command(label="小 (120)", command=lambda: set_size(120))
+        size_menu.add_command(label="中 (200)", command=lambda: set_size(200))
+        size_menu.add_command(label="大 (280)", command=lambda: set_size(280))
+        menu.add_cascade(label="调整大小", menu=size_menu)
         
         menu.add_command(
-            label=f"{'Disable' if self.use_animation else 'Enable'} Animation",
+            label=f"{'关闭' if self.use_animation else '开启'}动画",
             command=toggle_animation,
         )
         menu.add_separator()
-        menu.add_command(label="About", command=show_about)
+        menu.add_command(label="关于", command=show_about)
         menu.add_separator()
-        menu.add_command(label="Exit", command=exit_app)
+        menu.add_command(label="退出", command=exit_app)
 
         try:
             x, y = win32api.GetCursorPos()
